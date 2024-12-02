@@ -1,0 +1,131 @@
+---
+title: "hw8_GohBram"
+author: "Bram Goh"
+format: 
+      pdf:
+        toc: true
+        embed-resources: true
+date: "`r Sys.Date()`"
+---
+
+```{r}
+#| message: false
+library(here)
+library(readxl)  # for reading excel files
+library(modelsummary)  # for summarizing data
+library(cmdstanr)  # use two cores
+library(posterior)
+library(bayesplot)
+library(brms)
+library(tidyverse)
+```
+
+# Research Question
+
+> Do statistical regularities in language production (specifically, content word ratio and combination ratio) predict performance on high predictability SPiN items?
+
+# Variables
+
+- `Highspin_successes`: grouped number of successes on high predictability SPiN trials.
+- `Highspin_trials`: number of high predictability SPiN trials
+- `content_word_ratio`: average ratio of content words (nouns, verbs, adjective, and adverbs) to total words per sentence
+- `combination_ratio`: average ratio of trigrams to total words per sentence
+
+## Data Import
+
+```{r}
+frog <- read.csv("processed_frog_data_ver2.csv")
+frog[1] <- NULL
+frog <- frog %>% select(c(qualtrics_id, content_word_ratio, combination_ratio, Highspin_successes, Highspin_trials))
+```
+
+## Variable Summary
+
+Table @tbl-summ-var shows the summary statistics for and Pearson's correlations between the variables of interest.
+
+```{r}
+#| label: tbl-summ-var
+#| tbl-cap: Descriptive statistics
+datasummary_skim(frog)
+datasummary_correlation(frog)
+```
+
+# Model
+
+Let $Y_i$ = `Highspin_successes`, $N_i$ = `Highspin_trials`, $X_1$ = `content_word_ratio`, $X_2$ = `combination_ratio`
+
+Model:
+$$
+  \begin{aligned}
+    Y_i \sim Bin(N_i, \mu_i)
+\\
+log(\frac{\mu_i}{1-\mu_i}) = \eta_i
+\\
+\eta_i = \beta_0 + \beta_1X_1 + \beta_2X_2 + \beta_3X_1 \times X_2
+  \end{aligned}
+$$
+
+Prior:
+$$
+  \begin{aligned}
+    \beta_0 \sim t_4(0, 1) \\
+    \beta_1 \sim t_4(0, 1) \\
+    \beta_2 \sim t_4(0, 1) \\
+    \beta_3 \sim t_4(0, 1) \\
+  \end{aligned}
+$$
+
+## Analysis
+
+We used 4 chains, each with 4,000 iterations (first 2,000 as warm-ups). 
+
+```{r}
+#| include: false
+m_logitlink <- brm(
+  Highspin_successes | trials(Highspin_trials) ~ content_word_ratio * combination_ratio,
+  family = binomial(link = "logit"),
+  data = frog,
+  prior = c(prior(student_t(4, 0, 2.5), class = "Intercept"),
+            prior(student_t(4, 0, 2.5), class = "b")
+           ),
+  seed = 1340,
+  file = "proj_m1",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+```
+
+# Results
+
+As shown in the rank histogram in @fig-rank-hist-fit below, the chains mixed well.
+
+```{r}
+#| label: fig-rank-hist-fit
+#| fig-cap: Rank histogram of the posterior distributions of model parameters.
+as_draws(m_logitlink) |>
+    mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio", "b_combination_ratio", "b_content_word_ratio:combination_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence
+#| tbl-cap: Posterior summary of the model with convergence statistics.
+m_logitlink
+```
+
+@tbl-summ-fit shows the summary output for $\beta_0$, $\beta_1$, $\beta_2$, and $\beta_3$, as well as model performance statistics.
+```{r}
+#| message: false
+#| label: tbl-summ-fit
+#| tbl-cap: Posterior summary of the model estimates.
+msummary(m_logitlink, estimate = "{estimate} [{conf.low}, {conf.high}]",
+         statistic = NULL, fmt = 2)
+```
+
+```{r}
+#| message: false
+pp_check(m_logitlink)
+```
+```
+
+The analysis showed that on average, the content word ratio (M = -2.87, 90% CI [-6.73, 0.57]) and combination ratio (M = 0.96, 90% CI [-1.64, 3.46]) were not significantly associated with performance on high predictability SPiN items. The interaction effect was also non-significant (M = -1.37, 90% CI [-5.39, 2.78]).
