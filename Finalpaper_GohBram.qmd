@@ -1,0 +1,348 @@
+---
+title: "Finalpaper_GohBram"
+author: "Bram Goh"
+format: 
+      pdf:
+        toc: true
+        embed-resources: true
+date: "`r Sys.Date()`"
+---
+
+```{r}
+#| message: false
+library(here)
+library(readxl)  # for reading excel files
+library(modelsummary)  # for summarizing data
+library(cmdstanr)  # use two cores
+library(posterior)
+library(bayesplot)
+library(brms)
+library(tidyverse)
+library(ggpubr)
+```
+
+# Research Question
+
+> Do statistical regularities in language production (specifically, content word ratio and combination ratio) predict performance on high predictability SPiN items?
+
+# Variables
+
+-   `Highspin_successes`: grouped number of successes on high predictability SPiN trials.
+-   `Highspin_trials`: number of high predictability SPiN trials
+-   `content_word_ratio`: average ratio of content words (nouns, verbs, adjective, and adverbs) to total words per sentence
+-   `combination_ratio`: average ratio of trigrams to total words per sentence
+
+## Data Import
+
+```{r}
+#| include: false
+frog <- read.csv("processed_frog_data_ver2.csv")
+frog[1] <- NULL
+frog <- frog %>% select(c(qualtrics_id, content_word_ratio, combination_ratio, Highspin_successes, Highspin_trials)) %>% mutate(Highspin_p = Highspin_successes/Highspin_trials)
+frog_prelim <- frog %>% select(c(content_word_ratio, combination_ratio, Highspin_p))
+```
+
+## Variable Summary
+
+Table @tbl-summ-var shows the summary statistics for and Pearson's correlations between the variables of interest.
+
+```{r}
+#| label: tbl-summ-var
+#| tbl-cap: Descriptive statistics
+datasummary_skim(frog_prelim)
+datasummary_correlation(frog_prelim)
+```
+
+`content_word_ratio` has a much higher correlation with performance on high predictability SPiN trials than `combination_ratio`. Thus, it may be worth examining models with `content_word_ratio` as the only predictor.
+
+# Model and priors
+
+Let $Y_i$ = `Highspin_successes`, $N_i$ = `Highspin_trials`, $T_i$ = `content_word_ratio`, $M_i$ = `combination_ratio`.
+
+## Binomial models
+
+We first ran 3 binomial models (Models B1, B2, and B3): one including both predictors and the interaction term, one including both predictors without the interaction term, and one with just `content_word_ratio`.
+
+The following priors were used (where relevant) for all binomial models. 
+$$
+Priors:
+  \begin{aligned}
+    \beta_0 \sim t_4(0, 2.5) \\
+    \beta_1 \sim t_4(0, 2.5) \\
+    \beta_2 \sim t_4(0, 2.5) \\
+    \beta_3 \sim t_4(0, 2.5) \\
+  \end{aligned}
+$$ 
+### Model B1 
+$$
+  \begin{aligned}
+    Y_i \sim Bin(N_i, &\mu_i)
+\\
+log(\frac{\mu_i}{1-\mu_i}) &= \eta_i
+\\
+\eta_i = \beta_0 + \beta_1T_i + \beta_2M_i + &\beta_3T_i \times M_i
+  \end{aligned}
+$$ 
+### Model B2 
+$$
+ \begin{aligned}
+    Y_i \sim Bin(N_i, \mu_i)
+\\
+log(\frac{\mu_i}{1-\mu_i}) = \eta_i
+\\
+\eta_i = \beta_0 + \beta_1T_i + \beta_2M_i
+  \end{aligned}
+$$ 
+### Model B3 
+$$
+  \begin{aligned}
+    Y_i \sim Bin(N_i, \mu_i)
+\\
+log(\frac{\mu_i}{1-\mu_i}) = \eta_i
+\\
+\eta_i = \beta_0 + \beta_1T_i
+  \end{aligned}
+$$ 
+## Normal models 
+We then also ran 3 normal models (Models N1, N2, and N3): similarly, one included both predictors and the interaction term, one included both predictors without the interaction term, and one included just `content_word_ratio`.
+
+The following priors were used (where relevant) for all normal models. 
+$$
+Priors:
+  \begin{aligned}
+    \beta_0 \sim N(0, 1) \\
+    \beta_1 \sim N(0, 1) \\
+    \beta_2 \sim N(0, 1) \\
+    \beta_3 \sim N(0, 1) \\
+    \sigma \sim t_4(0, 2.5) \\
+  \end{aligned}
+$$ 
+### Model N1 
+$$
+  \begin{aligned}
+    Y_i &\sim N(\mu_i, \sigma)
+\\
+\mu_i = \beta_0 + \beta_1T_i + &\beta_2M_i + \beta_3T_i \times M_i
+  \end{aligned}
+$$ 
+### Model N2 
+$$
+ \begin{aligned}
+    Y_i &\sim N(\mu_i, \sigma)
+\\
+\mu_i = \beta_0 + &\beta_1T_i + \beta_2M_i
+  \end{aligned}
+$$ 
+### Model N3 
+$$
+ \begin{aligned}
+    Y_i \sim N(\mu_i, \sigma)
+\\
+\mu_i = \beta_0 + \beta_1T_i
+  \end{aligned}
+$$ 
+
+# Analysis
+
+For all models fitted, we used 4 chains, each with 4,000 iterations (first 2,000 as warm-ups).
+
+```{r}
+#| include: false
+b1 <- brm(
+  Highspin_successes | trials(Highspin_trials) ~ content_word_ratio * combination_ratio,
+  family = binomial(link = "logit"),
+  data = frog,
+  prior = c(prior(student_t(4, 0, 2.5), class = "Intercept"),
+            prior(student_t(4, 0, 2.5), class = "b")
+           ),
+  seed = 1340,
+  file = "final_b1",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+b2 <- brm(
+  Highspin_successes | trials(Highspin_trials) ~ content_word_ratio + combination_ratio,
+  family = binomial(link = "logit"),
+  data = frog,
+  prior = c(prior(student_t(4, 0, 2.5), class = "Intercept"),
+            prior(student_t(4, 0, 2.5), class = "b")
+           ),
+  seed = 1340,
+  file = "final_b2",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+b3 <- brm(
+  Highspin_successes | trials(Highspin_trials) ~ content_word_ratio,
+  family = binomial(link = "logit"),
+  data = frog,
+  prior = c(prior(student_t(4, 0, 2.5), class = "Intercept"),
+            prior(student_t(4, 0, 2.5), class = "b")
+           ),
+  seed = 1340,
+  file = "final_b3",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+```
+
+```{r}
+#| include: false
+n1 <- brm(
+  Highspin_p ~ content_word_ratio * combination_ratio,
+  data = frog,
+  prior = c(prior(normal(0, 1), class = "Intercept"),
+            prior(normal(0, 1), class = "b"),
+            prior(student_t(4, 0, 2.5), class = "sigma")
+           ),
+  seed = 1340,
+  file = "final_n1",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+
+n2 <- brm(
+  Highspin_p ~ content_word_ratio + combination_ratio,
+  data = frog,
+  prior = c(prior(normal(0, 1), class = "Intercept"),
+            prior(normal(0, 1), class = "b"),
+            prior(student_t(4, 0, 2.5), class = "sigma")
+           ),
+  seed = 1340,
+  file = "final_n2",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+
+n3 <- brm(
+  Highspin_p ~ content_word_ratio,
+  data = frog,
+  prior = c(prior(normal(0, 1), class = "Intercept"),
+            prior(normal(0, 1), class = "b"),
+            prior(student_t(4, 0, 2.5), class = "sigma")
+           ),
+  seed = 1340,
+  file = "final_n3",
+  cores = 2,
+  chains = 4,
+  iter = 4000,
+  warmup = 2000)
+```
+
+# Results
+
+## Convergence statistics and summaries of posterior distributions
+
+As shown in the rank histograms in @fig-rank-hist-b1 to @fig-rank-hist-n3, the chains mixed well. The other convergence diagnostics corroborate the conclusion that all 6 models converged.
+
+```{r}
+#| label: fig-rank-hist-b1
+#| fig-cap: Rank histogram of the posterior distributions of Model B1.
+as_draws(b1) |>
+    mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio", "b_combination_ratio", "b_content_word_ratio:combination_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence-b1
+#| tbl-cap: Posterior summary of Model B1 with convergence statistics.
+b1
+```
+
+```{r}
+#| label: fig-rank-hist-b2 
+#| fig-cap: Rank histogram of the posterior distributions of Model B2. 
+as_draws(b2) |> 
+  mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio", "b_combination_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence-b2
+#| tbl-cap: Posterior summary of Model B2 with convergence statistics.
+b2
+```
+
+```{r}
+#| label: fig-rank-hist-b3 
+#| fig-cap: Rank histogram of the posterior distributions of Model B3. 
+as_draws(b3) |> 
+  mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence-b3
+#| tbl-cap: Posterior summary of Model B3 with convergence statistics.
+b3
+```
+
+```{r}
+#| label: fig-rank-hist-n1 
+#| fig-cap: Rank histogram of the posterior distributions of Model N1. 
+n1_rankhist <- as_draws(n1) |> 
+  mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio", "b_combination_ratio", "b_content_word_ratio:combination_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence-n1
+#| tbl-cap: Posterior summary of Model N1 with convergence statistics.
+n1
+```
+
+```{r}
+#| label: fig-rank-hist-n2 
+#| fig-cap: Rank histogram of the posterior distributions of Model N2. 
+n2_rankhist <- as_draws(n2) |> 
+  mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio", "b_combination_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence-n2
+#| tbl-cap: Posterior summary of Model N2 with convergence statistics.
+n2
+```
+
+```{r}
+#| label: fig-rank-hist-n3 
+#| fig-cap: Rank histogram of the posterior distributions of Model N3. 
+n3_rankhist <- as_draws(n3) |> 
+  mcmc_rank_hist(pars = c("b_Intercept", "b_content_word_ratio"))
+```
+
+```{r}
+#| label: tbl-summ-convergence-n3
+#| tbl-cap: Posterior summary of Model N3 with convergence statistics.
+n3
+```
+
+## Posterior predictive checks
+
+The posterior predictive checks show that the normal models fit the data better than the binomial models.
+
+```{r}
+b1_ppc <- pp_check(b1)
+b2_ppc <- pp_check(b2)
+b3_ppc <- pp_check(b3)
+n1_ppc <- pp_check(n1)
+n2_ppc <- pp_check(n2)
+n3_ppc <- pp_check(n3)
+ggarrange(n1_ppc, n2_ppc, n3_ppc, ncol = 2, nrow = 2, labels = c("Model 1", "Model 2", "Model 3"), hjust = -0.2, legend = "left")
+```
+
+## Model Comparison
+
+The posterior predictive checks reveal that the normal models fit the data better than the binomial models. Comparing elpd statistics reveals that Model N3 containing `content_word_ratio` as the sole predictor outperforms the other two models.
+
+```{r}
+#| include: false
+n1 <- add_criterion(n1, c("loo", "waic"))
+n2 <- add_criterion(n2, c("loo", "waic"))
+n3 <- add_criterion(n3, c("loo", "waic"))
+```
+
+```{r}
+loo_compare(n1, n2, n3)
+```
